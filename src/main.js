@@ -1,0 +1,1 @@
+const {BlockChain, Transaction} = require('./blockchain');
