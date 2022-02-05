@@ -2,7 +2,6 @@ const crypto = require('crypto');
 const EC = require('elliptic').ec;
 const ec = new EC('secp256k1');
 const debug = require('debug')('blockchain');
-
 class Transaction {
     /**
      * @param {string} sender
@@ -13,8 +12,7 @@ class Transaction {
         this.sender = sender;
         this.recipient = recipient;
         this.amount = amount;
-        this.signature = null;
-        this.timestamp = new Date().getTime();
+        this.timestamp = Date.now();
     }
 
     /**
@@ -33,14 +31,12 @@ class Transaction {
      */
 
     signTransaction(privateKey) {
-        if(privateKey === this.sender) {
-            const key = ec.keyFromPrivate(privateKey, 'hex');
-            const hash = this.calculateHash();
-            const signature = key.sign(hash);
-            this.signature = signature.toDER('hex');
-        } else {
-            debug('You cannot sign transactions for other wallets');
+        if (privateKey.getPublic('hex') !== this.sender) {
+            throw new Error('You cannot sign transactions for other wallets!');
         }
+        const hashTx = this.calculateHash();
+        const sig = ec.sign(hashTx, privateKey);
+        this.signature = sig.toDER('hex');
     }
 
     /**
@@ -50,9 +46,13 @@ class Transaction {
      */
 
     isValid() {
-        if(this.signature === null) {
+        if (this.signature === null) {
             debug('No signature in this transaction');
-            return false;
+            return true;
+        }
+
+        if (!this.signature || this.signature.length === 0) {
+            debug('Empty signature');
         }
         const publicKey = ec.keyFromPublic(this.sender, 'hex');
         return publicKey.verify(this.calculateHash(), this.signature);
@@ -69,13 +69,12 @@ class Block {
      * @param {number} nonce
      */
 
-    constructor(index, previousHash, transactions, timestamp, hash, nonce) {
-        this.index = index;
+    constructor(previousHash = '', transactions, timestamp) {
         this.previousHash = previousHash;
         this.transactions = transactions;
         this.timestamp = timestamp;
-        this.hash = hash;
-        this.nonce = nonce;
+        this.hash = this.calculateHash();
+        this.nonce = 1;
     }
 
     /**
@@ -95,10 +94,11 @@ class Block {
      */
 
     mineBlock(difficulty) {
-        while (this.hash.substring(0, difficulty) !== Array(difficulty + 1).join('1')) {
+        while (this.hash?.substring(0, difficulty) !== Array(difficulty + 1).join('1')) {
             this.nonce++;
             this.hash = this.calculateHash();
         }
+        debug('Block mined: ' + this.previousHash);
         debug('Block mined: ' + this.hash);
     }
 
@@ -131,7 +131,7 @@ class Blockchain {
      * @returns {Block}
      */
     createGenesisBlock() {
-        return new Block(0, '0', [], new Date().getTime(), '0', 0);
+        return new Block('0', [], Date.now());
     }
 
     /**
@@ -155,7 +155,7 @@ class Blockchain {
     minePendingTransactions(miningRewardAddress) {
         const rewardTx = new Transaction(null, miningRewardAddress, this.mineReward);
         this.pendingTransactions.push(rewardTx);
-        const block = new Block(this.getLatestBlock().index + 1, this.getLatestBlock().hash, this.pendingTransactions, new Date().getTime(), null, 0);
+        const block = new Block(this.getLatestBlock().hash, this.pendingTransactions, Date.now());
         block.mineBlock(this.difficulty);
         debug('Block successfully mined!');
         this.chain.push(block);
@@ -185,7 +185,7 @@ class Blockchain {
         }
 
         this.pendingTransactions.push(transaction);
-        debug('Transaction successfully added to pending transactions: ' + JSON.stringify(transaction));
+        debug('Transaction successfully added to pending transactions: ' + JSON.stringify(transaction.sender));
     }
 
     /**
@@ -238,6 +238,8 @@ class Blockchain {
 
         if (realGenesis !== JSON.stringify(this.chain[0])) {
             debug('The genesis block has been tampered with');
+            debug('The real genesis block is: ' + realGenesis);
+            debug('The tampered genesis block is: ' + JSON.stringify(this.chain[0]));
             return false;
         }
 
@@ -249,17 +251,17 @@ class Blockchain {
             const previousBlock = this.chain[i - 1];
 
             if (!currentBlock.hasValidTransactions()) {
-                debug('Block #' + currentBlock.index + ' has invalid transactions');
+                debug('Block has invalid transactions');
                 return false;
             }
 
             if (currentBlock.hash !== currentBlock.calculateHash()) {
-                debug('Block #' + currentBlock.index + ' has invalid hash');
+                debug('Block  has invalid hash');
                 return false;
             }
 
             if (currentBlock.previousHash !== previousBlock.hash) {
-                debug('Block #' + currentBlock.index + ' has invalid previous hash');
+                debug('Block  has invalid previous hash');
                 return false;
             }
         }
@@ -268,6 +270,8 @@ class Blockchain {
 
 }
 
-module.exports = Blockchain;
-module.exports.Block = Block;
-module.exports.Transaction = Transaction;
+module.exports = {
+    Blockchain,
+    Block,
+    Transaction
+};
